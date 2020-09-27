@@ -419,34 +419,6 @@ async function showPlayer(id, client) {
     }
   });
 
-  app.get('/api/account/party/member/hide', async (req, res) => {
-    if(!req.query.id) return throwError(res, 400);
-    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
-    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const id = req.query.id;
-    const session = sessions.find(session => session.user === user.id);
-    if(!session) return throwError(res, 401, 'Session not found.');
-    const client = session.client;
-    const member = client.party.members.find(m => m.id === id);
-    if(!member) return throwError(res, 404, 'Member not found.');
-    await hidePlayer(member.id, client);
-    res.sendStatus(200);
-  });
-
-  app.get('/api/account/party/member/show', async (req, res) => {
-    if(!req.query.id) return throwError(res, 400);
-    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
-    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const id = req.query.id;
-    const session = sessions.find(session => session.user === user.id);
-    if(!session) return throwError(res, 401, 'Session not found.');
-    const client = session.client;
-    const member = client.party.members.find(m => m.id === id);
-    if(!member) return throwError(res, 404, 'Member not found.');
-    await showPlayer(member.id, client);
-    res.sendStatus(200);
-  });
-
   function setEvents(client, res) {
     async function getParty() {
       const members = [];
