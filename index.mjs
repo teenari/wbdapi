@@ -341,16 +341,32 @@ async function showPlayer(id, client) {
     res.send({ auth: req.headers['set-cookie'][0].split('auth=')[1] });
   });
 
-  app.put('/api/account/party/me/meta', async (req, res) => {
+  app.put('/api/account/meta', async (req, res) => {
     if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
     const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const array = req.query.array;
-    const f = req.query.function;
     const session = sessions.find(session => session.user === user.id);
-    if(!session) return throwError(res, 401);
+    if(!session) return throwError(res, 401, 'Create a session first!');
     const client = session.client;
-    client.party.me[f](...JSON.parse(array));
-    res.send(200);
+    const operation = req.body.operation;
+    if(!operation) return throwError(res, 403, 'operation is needed.');
+    switch(operation) {
+      case 'cosmetic': {
+        const type = req.body.type;
+        const args = req.body.arguments;
+        if(!type) return throwError(res, 403, 'type is needed.');
+        if(!args) return throwError(res, 403, 'arguments is needed.');
+        try {
+          await client.party.me[`set${type.charAt(0).toUpperCase() + type.slice(1)}`](...args);
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      default: {
+        throwError(res, 403, 'Operation is invalid.');
+      } break;
+    }
   });
 
   app.get('/api/account/party/kick', async (req, res) => {
@@ -365,6 +381,42 @@ async function showPlayer(id, client) {
     if(!member) return throwError(res, 404, 'Member not found.');
     await member.kick();
     res.sendStatus(200);
+  });
+
+  app.post('/api/account/party/member', async (req, res) => {
+    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
+    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
+    const session = sessions.find(session => session.user === user.id);
+    if(!session) return throwError(res, 401, 'Create a session first!');
+    const client = session.client;
+    const operation = req.body.operation;
+    const id = req.query.id;
+    if(!operation) return throwError(res, 403, 'operation is needed.');
+    if(!id) return throwError(res, 403, 'id of member is needed.');
+    if(!client.party.members.find(m => m.id === id)) return throwError(res, 404, 'Member not found.');
+    switch(operation) {
+      case 'hide': {
+        try {
+          await hidePlayer(id, client);
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      case 'show': {
+        try {
+          await showPlayer(id, client);
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      default: {
+        throwError(res, 403, 'Operation is invalid.');
+      } break;
+    }
   });
 
   app.get('/api/account/party/member/hide', async (req, res) => {
@@ -544,21 +596,57 @@ async function showPlayer(id, client) {
     res.send(friends);
   });
 
-  app.get('/api/account/friends/join', async (req, res) => {
+  app.post('/api/account/party', async (req, res) => {
     if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
     const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
     const session = sessions.find(session => session.user === user.id);
     if(!session) return throwError(res, 401, 'Create a session first!');
     const client = session.client;
-    const friends = client.friends.toArray();
-    const friend = req.query.id;
-    if(!friend) return throwError(res, 400);
-    const friendoL = friends.find(frien => frien[Object.keys(frien)[0]].displayName === friend);
-    const friendo = friendoL[Object.keys(friendoL)[0]];
-    if(!friendo) return throwError(res, 400);
-    
-    await friendo.joinParty();
-    res.sendStatus(200);
+    const operation = req.body.operation;
+    if(!operation) return throwError(res, 403, 'operation is needed.');
+    switch(operation) {
+      case 'leave': {
+        try {
+          await client.party.leave();
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      case 'join': {
+        const type = req.body.type;
+        const id = req.body.id;
+        if(!type) return throwError(res, 403, 'type is needed.');
+        if(!id) return throwError(res, 403, 'id is needed.');
+        switch(type) {
+          case 'friend': {
+            const friend = client.friends.toArray().find(e => e[Object.keys(e)[0]].id === id)[Object.keys(client.friends.toArray().find(e => e[Object.keys(e)[0]].id === id))[0]];
+            if(!friend) return throwError(res, 400);
+            try {
+              await friend.joinParty();
+            } catch(err) {
+              return res.status(403).send(err);
+            }
+            res.send(204);
+          } break;
+
+          default: {
+            throwError(res, 403, 'type is invalid.');
+          } break;
+        }
+        try {
+          await client.party.leave();
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      default: {
+        throwError(res, 403, 'Operation is invalid.');
+      } break;
+    }
   });
   
   app.get('/api/account/fn/content', async (req, res) => {
@@ -567,17 +655,6 @@ async function showPlayer(id, client) {
     const session = sessions.find(session => session.user === user.id);
     if(!session) return throwError(res, 401, 'Create a session first!');
     res.send(await (await fetch('https://fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game')).json());
-  });
-
-  app.get('/api/account/time', async (req, res) => {
-    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
-    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const session = sessions.find(session => session.user === user.id);
-    if(!session) return throwError(res, 401, 'Create a session first!');
-    res.send({
-      minutes: 60,
-      seconds: 0
-    });
   });
 
   app.post('/api/account/friends/send', async (req, res) => {
