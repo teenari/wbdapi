@@ -21,9 +21,7 @@ const rl = readline.createInterface({
 });
 
 const env = process.env;
-
 const app = express();
-
 let sessions = [];
 const queues = {};
 const accountsSessions = {[env.AUTH_DISCORD]: {
@@ -42,16 +40,8 @@ app.use(sessionexpress({
     sameSite: 'strict'
   }
 }));
-
-app.use(cors({credentials: true, origin: 'https://dashboard.webfort.app'})); 
-
+app.use(cors({credentials: true, origin: /blobry\.com$/})); 
 app.use(bodyParser.json());
-
-let ress = null;
-
-function write(data) {
-  if(ress) ress.write(`data: ${JSON.stringify(data)}\n\n`);
-}
 
 const statusCodetoObject = {
   401: {
@@ -369,20 +359,6 @@ async function showPlayer(id, client) {
     }
   });
 
-  app.get('/api/account/party/kick', async (req, res) => {
-    if(!req.query.id) return throwError(res, 400);
-    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
-    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const id = req.query.id;
-    const session = sessions.find(session => session.user === user.id);
-    if(!session) return throwError(res, 401, 'Session not found.');
-    const client = session.client;
-    const member = client.party.members.find(m => m.id === id);
-    if(!member) return throwError(res, 404, 'Member not found.');
-    await member.kick();
-    res.sendStatus(200);
-  });
-
   app.post('/api/account/party/member', async (req, res) => {
     if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
     const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
@@ -393,7 +369,8 @@ async function showPlayer(id, client) {
     const id = req.query.id;
     if(!operation) return throwError(res, 403, 'operation is needed.');
     if(!id) return throwError(res, 403, 'id of member is needed.');
-    if(!client.party.members.find(m => m.id === id)) return throwError(res, 404, 'Member not found.');
+    const member = client.party.members.find(m => m.id === id);
+    if(!member) return throwError(res, 404, 'Member not found.');
     switch(operation) {
       case 'hide': {
         try {
@@ -412,6 +389,15 @@ async function showPlayer(id, client) {
         }
         res.send(204);
       } break;
+
+      case 'kick': {
+        try {
+          await member.kick();
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break
 
       default: {
         throwError(res, 403, 'Operation is invalid.');
@@ -436,77 +422,72 @@ async function showPlayer(id, client) {
         meta: gets(client.party.meta.schema)
       });
     }
-    client.on('friend:request', async (req) => {
-      await req.accept();
-    });
-      client.on('party:member:joined', async (req) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'refresh:party', party: await getParty(), data: req })}\n\n`);
-        res.write(`data: ${JSON.stringify({ event: 'party:member:joined', data: req })}\n\n`);
-      }
-    });
-    client.on('party:updated', async (req) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'refresh:party', party: await getParty(), data: req })}\n\n`);
-      }
-    });
-    client.on('party:member:disconnected', async (req) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'refresh:party', party: await getParty(), data: req })}\n\n`);
-      }
-    });
-    client.on('friend:message', async (message) => {
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'friend:message', data: {
-          content: message.content,
-          author: {
-            id: message.author.id,
-            displayName: message.author.displayName
-          },
-          sentAt: new Date().toISOString()
-        }})}\n\n`);
-      }
-    });
-    client.on('party:member:message', async (message) => {
-      console.log(message);
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'party:message', data: message })}\n\n`);
-      }
-    });
-    client.on('party:invite', async (e) => {
-      try {
-        await e.accept();
-      } catch(s) {}
-    });
-    client.on('party:member:kicked', async (req) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'refresh:party', party: await getParty(), data: req })}\n\n`);
-        res.write(`data: ${JSON.stringify({ event: 'party:member:kicked', data: req })}\n\n`);
-      }
-    });
-    client.on('party:member:expired', async (req) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'refresh:party', party: await getParty(), data: req })}\n\n`);
-      }
-    });
-    client.on('party:member:left', async (req) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'refresh:party', party: await getParty(), data: req })}\n\n`);
-        res.write(`data: ${JSON.stringify({ event: 'party:member:left', data: req })}\n\n`);
-      }
-    });
-    client.on('party:member:updated', async (req) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      if(!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ event: 'refresh:party', party: await getParty(), data: req })}\n\n`);
-      }
-    });
+    for (const even of [{
+      event: 'friend:request',
+      accept: true
+    }, {
+      event: 'party:member:joined',
+      data: ['party', 'event']
+    }, {
+      event: 'party:updated',
+      data: ['party']
+    }, {
+      event: 'friend:message',
+      data: ['friend:custom']
+    }, {
+      event: 'party:member:message',
+      data: ['event']
+    }, {
+      event: 'party:invite',
+      accept: true
+    }, {
+      event: 'party:member:kicked',
+      data: ['event', 'party']
+    }, {
+      event: 'party:member:expired',
+      data: ['event', 'party']
+    }, {
+      event: 'party:member:left',
+      data: ['event', 'party']
+    }, {
+      event: 'party:member:updated',
+      data: ['event', 'party']
+    }]) {
+      client.on(even.event, async (data) => {
+        if(res.writableEnded) return;
+        if(even.accept) {
+          try {
+            await data.accept();
+          } catch(error) {
+            console.log(error);
+          }
+        }
+        if(even.data) {
+          for (const d of even.data) {
+            switch(d) {
+              case 'party': {
+                res.write(`data: ${JSON.stringify({ event: 'refresh:party', party: await getParty(), data })}\n\n`);
+              } break;
+
+              case 'event': {
+                res.write(`data: ${JSON.stringify({ event: even.event, data: data })}\n\n`);
+              } break;
+
+              case 'friend:custom': {
+                res.write(`data: ${JSON.stringify({ event: 'friend:message', data: {
+                  content: data.content,
+                  author: {
+                    id: data.author.id,
+                    displayName: data.author.displayName
+                  },
+                  sentAt: new Date().toISOString()
+                }})}\n\n`);
+              } break;
+            }
+          }
+        }
+      });
+    }
   }
 
   function gets(value) {
@@ -606,9 +587,72 @@ async function showPlayer(id, client) {
           default: {
             throwError(res, 403, 'type is invalid.');
           } break;
-        }
+        };
+      } break;
+
+      case 'send': {
+        const message = req.body.message;
+        if(!message) return throwError(res, 403, 'message is needed.');
         try {
-          await client.party.leave();
+          await client.party.sendMessage(message);
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      default: {
+        throwError(res, 403, 'Operation is invalid.');
+      } break;
+    }
+  });
+
+  app.post('/api/account/friend', async (req, res) => {
+    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
+    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
+    const session = sessions.find(session => session.user === user.id);
+    if(!session) return throwError(res, 401, 'Create a session first!');
+    const client = session.client;
+    const operation = req.body.operation;
+    const id = req.body.id;
+    if(!operation) return throwError(res, 403, 'operation is needed.');
+    if(!id) return throwError(res, 403, 'id is needed.');
+    const friend = client.friends.toArray().find(e => e[Object.keys(e)[0]].id === id)[Object.keys(client.friends.toArray().find(e => e[Object.keys(e)[0]].id === id))[0]];
+    if(!friend) return throwError(res, 403, 'friend does not exist.');
+    switch(operation) {
+      case 'join': {
+        if(!friend) return throwError(res, 400);
+        try {
+          await friend.joinParty();
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      case 'send': {
+        const message = req.body.message;
+        if(!message) return throwError(res, 403, 'message is needed.');
+        try {
+          await friend.sendMessage(message);
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      case 'remove': {
+        try {
+          await friend.remove();
+        } catch(err) {
+          return res.status(403).send(err);
+        }
+        res.send(204);
+      } break;
+
+      case 'invite': {
+        try {
+          await friend.invite();
         } catch(err) {
           return res.status(403).send(err);
         }
@@ -627,55 +671,6 @@ async function showPlayer(id, client) {
     const session = sessions.find(session => session.user === user.id);
     if(!session) return throwError(res, 401, 'Create a session first!');
     res.send(await (await fetch('https://fortnitecontent-website-prod07.ol.epicgames.com/content/api/pages/fortnite-game')).json());
-  });
-
-  app.post('/api/account/friends/send', async (req, res) => {
-    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
-    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const session = sessions.find(session => session.user === user.id);
-    const friend = req.query.id;
-    const message = req.query.message;
-    if(!friend || !message) return throwError(res, 400);
-    if(!session || !session.client) return throwError(res, 401);
-    const client = session.client;
-    client.sendFriendMessage(friend, message);
-    res.sendStatus(204);
-  });
-
-  app.post('/api/account/party/send', async (req, res) => {
-    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
-    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const session = sessions.find(session => session.user === user.id);
-    const message = req.query.message;
-    if(!message) return throwError(res, 400);
-    if(!session || !session.client) return throwError(res, 401);
-    const client = session.client;
-    client.party.sendMessage(message);
-    res.sendStatus(204);
-  });
-
-  app.post('/api/account/friends/remove', async (req, res) => {
-    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
-    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const session = sessions.find(session => session.user === user.id);
-    const friend = req.query.id;
-    if(!friend) return throwError(res, 400);
-    if(!session || !session.client) return throwError(res, 401);
-    const client = session.client;
-    await client.removeFriend(friend);
-    res.sendStatus(204);
-  });
-
-  app.post('/api/account/friends/invite', async (req, res) => {
-    if(!accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]]) return throwError(res, 401);
-    const user = accountsSessions[req.headers['set-cookie'][0].split('auth=')[1]].user;
-    const session = sessions.find(session => session.user === user.id);
-    const friend = req.query.id;
-    if(!friend)  return throwError(res, 400);
-    if(!session || !session.client) return throwError(res, 401);
-    const client = session.client;
-    await client.invite(friend);
-    res.sendStatus(204);
   });
 
   app.get('/api/user', async (req, res) => {
